@@ -31,8 +31,8 @@
     </a>
 
     <nav class="nav-links" aria-label="Sezioni">
-      <button class="nav-link is-active" data-tab="play">Gioca</button>
-      <button class="nav-link" data-tab="friends">Amici <span class="pill" id="friends-online-count" hidden>0</span></button>
+      <button class="nav-link" data-tab="play">Gioca</button>
+      <button class="nav-link is-active" data-tab="friends">Amici <span class="pill" id="friends-online-count" hidden>0</span></button>
       <button class="nav-link" data-tab="review">Revisione</button>
     </nav>
 
@@ -42,7 +42,7 @@
       </span>
       <button class="user-chip" id="user-chip" title="Il tuo codice amico (clic per copiare)">
         <span class="avatar" id="user-avatar">G</span>
-        <span id="user-chip-text">Giocatore#------</span>
+        <span id="user-chip-text">Giocatore ------</span>
       </button>
       <button class="icon-btn" id="btn-theme" title="Cambia tema" aria-label="Cambia tema">◐</button>
     </div>
@@ -52,7 +52,7 @@
   <main class="layout">
 
     <!-- ---------- Colonna scacchiera ---------- -->
-    <section class="board-col" aria-label="Scacchiera">
+    <section class="board-col" aria-label="Scacchiera" hidden>
       <div class="player-bar" id="bar-top">
         <span class="avatar" data-role="avatar">?</span>
         <div class="player-info">
@@ -90,13 +90,13 @@
     <aside class="side">
 
       <div class="tabs" role="tablist">
-        <button class="tab is-active" role="tab" data-tab="play">♟ Gioca</button>
-        <button class="tab" role="tab" data-tab="friends">👥 Amici</button>
+        <button class="tab" role="tab" data-tab="play">♟ Gioca</button>
+        <button class="tab is-active" role="tab" data-tab="friends">👥 Amici</button>
         <button class="tab" role="tab" data-tab="review">📊 Revisione</button>
       </div>
 
       <!-- ===== TAB: GIOCA ===== -->
-      <div class="tab-panel is-active" id="tab-play" role="tabpanel">
+      <div class="tab-panel" id="tab-play" role="tabpanel">
         <div class="segmented" id="mode-switch" role="group" aria-label="Modalità di gioco">
           <button data-mode="bot" class="is-active">🤖 Bot</button>
           <button data-mode="local">👥 Locale</button>
@@ -161,7 +161,7 @@
       </div>
 
       <!-- ===== TAB: AMICI ===== -->
-      <div class="tab-panel" id="tab-friends" role="tabpanel">
+      <div class="tab-panel is-active" id="tab-friends" role="tabpanel">
         <div class="card-inner">
           <h3>Il tuo profilo</h3>
           <label class="field">
@@ -178,7 +178,7 @@
         <div class="card-inner">
           <h3>Aggiungi un amico</h3>
           <form class="row" id="form-add-friend">
-            <input type="text" id="friend-input" placeholder="Codice (es. Mario#K7P2QX)" autocomplete="off" spellcheck="false">
+            <input type="text" id="friend-input" placeholder="Codice (es. Mario K7P2QX)" autocomplete="off" spellcheck="false">
             <button class="btn btn-primary" type="submit">Aggiungi</button>
           </form>
         </div>
@@ -305,12 +305,9 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <!-- ===================== LIBRERIE (CDN gratuite) ===================== -->
-  <!-- jQuery è richiesto da chessboard.js -->
   <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
   <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
-  <!-- chess.js 0.10.x: regole, mosse legali, PGN, scacco matto/patta -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.js"></script>
-  <!-- PeerJS: connessioni P2P (broker di segnalazione pubblico e gratuito) -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
   <script src="app.js"></script>

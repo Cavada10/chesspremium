@@ -6,19 +6,6 @@
      • chess.js 0.10.x          → regole, mosse legali, PGN, matto/patta
      • PeerJS                   → connessioni P2P (amici, sfide, stanze)
      • Stockfish.js (Worker)    → bot e revisione della partita
-
-   Indice del file
-     1. Utilità e costanti
-     2. Profilo locale (username + ID amico)
-     3. Interfaccia base (toast, modali, tab, tema)
-     4. Motore Stockfish (Web Worker)
-     5. Stato della partita e regole
-     6. Rendering (scacchiera, mosse, barre giocatore, valutazione)
-     7. Input sulla scacchiera (drag & drop + click)
-     8. Bot
-     9. Revisione partita
-    10. Rete P2P: amici, sfide, stanze
-    11. Azioni dell'interfaccia e avvio
    ========================================================================== */
 (function () {
   'use strict';
@@ -33,7 +20,6 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  /** Piccolo wrapper di localStorage con prefisso e JSON (non esplode se non disponibile). */
   const store = {
     get(key, fallback) {
       try {
@@ -46,12 +32,11 @@
     }
   };
 
-  /** Nomi e ID provenienti dalla rete vengono sempre "ripuliti". */
   const cleanName = (s) => String(s || '').replace(/[^\p{L}\p{N} _.\-]/gu, '').trim().slice(0, 20);
   const cleanId = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
 
   function genId(len) {
-    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // niente I, O, 0, 1 (ambigui)
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let out = '';
     const bytes = new Uint8Array(len);
     if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
@@ -60,13 +45,11 @@
     return out;
   }
 
-  // Immagini dei pezzi (tema "wikipedia" ufficiale di chessboard.js) + host di riserva.
   const PIECE_HOSTS = [
     'https://chessboardjs.com/img/chesspieces/wikipedia/',
     'https://koblenski.github.io/javascript/chessboardjs-0.3.0/img/chesspieces/wikipedia/'
   ];
   const pieceUrl = (code) => PIECE_HOSTS[0] + code + '.png';
-  // Se un'immagine non si carica dal primo host, prova il secondo.
   document.addEventListener('error', (e) => {
     const t = e.target;
     if (t && t.tagName === 'IMG' && typeof t.src === 'string' && t.src.indexOf(PIECE_HOSTS[0]) === 0) {
@@ -74,8 +57,8 @@
     }
   }, true);
 
-  const PEER_USER = 'chesspremium-u-';   // prefisso ID PeerJS degli utenti
-  const PEER_ROOM = 'chesspremium-r-';   // prefisso ID PeerJS delle stanze
+  const PEER_USER = 'chesspremium-u-';
+  const PEER_ROOM = 'chesspremium-r-';
   const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
   const START_COUNT = { p: 8, n: 2, b: 2, r: 2, q: 1 };
 
@@ -87,7 +70,6 @@
     5: { name: 'Maestro', skill: 20, depth: 12, time: 2200 }
   };
 
-  // Classificazione delle mosse nella revisione
   const CLASSES = [
     { key: 'best', label: 'Migliore', sym: '★' },
     { key: 'excellent', label: 'Ottima', sym: '!' },
@@ -117,7 +99,7 @@
   const saveFriends = () => store.set('friends', friends);
 
   /* ======================================================================
-     3. INTERFACCIA BASE: toast, modali, tab, tema, appunti
+     3. INTERFACCIA BASE
      ====================================================================== */
   function toast(message, kind) {
     const box = byId('toasts');
@@ -131,7 +113,6 @@
   const openModal = (id) => { byId(id).hidden = false; };
   const closeModal = (id) => { byId(id).hidden = true; };
 
-  /** Finestra di conferma generica. Restituisce una Promise<boolean>. */
   let confirmState = null;
   function askConfirm(opts) {
     if (confirmState) closeConfirm(false);
@@ -162,6 +143,10 @@
     qsa('.tab').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === name));
     qsa('.nav-link').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === name));
     qsa('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.id === 'tab-' + name));
+    
+    const boardCol = document.querySelector('.board-col');
+    if (boardCol) boardCol.hidden = (name !== 'play');
+    
     if (name === 'friends') refreshPresence();
   }
 
@@ -197,13 +182,6 @@
 
   /* ======================================================================
      4. MOTORE STOCKFISH (Web Worker)
-     --------------------------------------------------------------------------
-     Ordine di caricamento:
-       1) "stockfish.js" accanto a index.html (copia locale, se la aggiungi)
-       2) Stockfish.js 10 da cdnjs, caricato in un worker "blob" (evita i
-          blocchi cross-origin dei Worker)
-     Se nessuno funziona il gioco resta usabile: il bot gioca mosse casuali
-     e la revisione mostra un messaggio.
      ====================================================================== */
   const SF_SOURCES = [
     { mode: 'direct', url: 'stockfish.js' },
@@ -220,7 +198,6 @@
       this.current = null;
     }
 
-    /** Carica il worker (una sola volta). Se fallisce, la Promise resta respinta. */
     init() {
       if (this.initPromise) return this.initPromise;
       this.initPromise = (async () => {
@@ -232,12 +209,12 @@
               const cur = this.current;
               this.current = null;
               this.worker = null;
-              this.initPromise = null; // al prossimo uso si ricarica
+              this.initPromise = null;
               if (cur) cur.reject(new Error('Il motore si è interrotto'));
             };
             this.worker = w;
             return;
-          } catch (e) { /* prova la sorgente successiva */ }
+          } catch (e) { /* prova la successiva */ }
         }
         throw new Error('Stockfish non disponibile');
       })();
@@ -259,7 +236,7 @@
         let step = 'uci';
         const fail = (err) => {
           clearTimeout(timer);
-          try { w.terminate(); } catch (e) { /* ignora */ }
+          try { w.terminate(); } catch (e) {}
           reject(err);
         };
         const timer = setTimeout(() => fail(new Error('timeout')), 20000);
@@ -278,10 +255,6 @@
       });
     }
 
-    /**
-     * Mette in coda una ricerca. opts: { depth, movetime, skill }.
-     * Risolve con { bestmove, cp, mate, pv, depth } dal punto di vista di chi muove.
-     */
     search(fen, opts) {
       return new Promise((resolve, reject) => {
         this.queue.push({ fen: fen, opts: opts || {}, resolve: resolve, reject: reject });
@@ -344,7 +317,6 @@
       }
     }
 
-    /** Annulla la coda e ferma la ricerca in corso (la sua Promise si risolve comunque). */
     cancelAll() {
       const pending = this.queue.splice(0);
       pending.forEach((j) => j.reject(new Error('cancelled')));
@@ -359,30 +331,29 @@
   const newReview = () => ({ status: 'idle', progress: 0, evals: [], cls: [], summary: null, error: null });
 
   const S = {
-    mode: 'bot',              // 'bot' | 'local' | 'online'
-    game: null,               // istanza chess.js (partita "viva")
-    fens: [],                 // fens[i] = posizione dopo i semimosse
-    moves: [],                // mosse verbose di chess.js
-    view: 0,                  // semimossa mostrata sulla scacchiera
+    mode: 'bot',
+    game: null,
+    fens: [],
+    moves: [],
+    view: 0,
     orientation: 'white',
-    myColor: 'w',             // colore umano (bot/online); in locale non usato
+    myColor: 'w',
     botColor: 'b',
     botLevel: 3,
     botBusy: false,
     botToken: 0,
     over: false,
-    result: null,             // { winner, reason, text, interrupted }
-    online: null,             // { conn, color, oppName, oppId, drawPending }
-    selected: null,           // casa selezionata (click-to-move)
-    targets: [],              // [{ to, capture }]
+    result: null,
+    online: null,
+    selected: null,
+    targets: [],
     review: newReview(),
     reviewToken: 0,
     promoCb: null
   };
 
-  let board = null; // istanza chessboard.js
+  let board = null;
 
-  /** Ricostruisce la lista di FEN e di mosse a partire da S.game. */
   function rebuild() {
     const hist = S.game.history({ verbose: true });
     const c = new window.Chess();
@@ -395,7 +366,6 @@
     S.fens = fens;
   }
 
-  /** Azzera tutto per iniziare una nuova partita. keepConn = connessione da NON chiudere. */
   function resetState(mode, extra, keepConn) {
     S.botToken++;
     S.botBusy = false;
@@ -445,7 +415,6 @@
     S.targets = [];
   }
 
-  /** Controlla se la partita è finita secondo le regole degli scacchi. */
   function checkGameEnd() {
     if (S.over) return;
     const g = S.game;
@@ -474,11 +443,6 @@
     setTimeout(() => { if (S.over) openModal('modal-over'); }, 450);
   }
 
-  /**
-   * Esegue una mossa sulla partita viva.
-   * opts: { fromDrag, send, remote }
-   * Restituisce la mossa (oggetto chess.js) oppure null se illegale.
-   */
   function commitMove(from, to, promo, opts) {
     opts = opts || {};
     if (S.over) return null;
@@ -500,10 +464,6 @@
     return m;
   }
 
-  /**
-   * Tenta una mossa dell'utente.
-   * Ritorna true (eseguita), 'promo' (in attesa della scelta del pezzo) o false (illegale).
-   */
   function attemptMove(from, to, promo, fromDrag) {
     if (!canMoveNow()) return false;
     const cands = S.game.moves({ square: from, verbose: true }).filter((m) => m.to === to);
@@ -595,7 +555,6 @@
     }
   }
 
-  /* ---- frecce SVG sulla scacchiera ---- */
   function sqCenter(sq) {
     const f = 'abcdefgh'.indexOf(sq[0]);
     const r = parseInt(sq[1], 10) - 1;
@@ -624,7 +583,6 @@
     byId('overlay').innerHTML = html;
   }
 
-  /* ---- elenco mosse ---- */
   function moveButton(ply, m) {
     const c = S.review.status === 'done' ? S.review.cls[ply - 1] : null;
     const badge = c ? '<i class="badge k-' + c.key + '" title="' + CLS[c.key].label + '">' + CLS[c.key].sym + '</i>' : '';
@@ -645,7 +603,6 @@
     else list.scrollTop = Math.max(0, cur.offsetTop - list.clientHeight / 2);
   }
 
-  /* ---- barre dei giocatori (nomi, pezzi catturati, materiale) ---- */
   function materialInfo(fen) {
     const cnt = { w: { p: 0, n: 0, b: 0, r: 0, q: 0 }, b: { p: 0, n: 0, b: 0, r: 0, q: 0 } };
     const placement = fen.split(' ')[0];
@@ -659,7 +616,6 @@
     const name = playerName(color);
     const info = materialInfo(S.fens[S.view]);
     const enemy = color === 'w' ? 'b' : 'w';
-    // Pezzi avversari catturati da questo giocatore
     let caps = '';
     ['q', 'r', 'b', 'n', 'p'].forEach((t) => {
       const n = Math.max(0, START_COUNT[t] - info.cnt[enemy][t]);
@@ -708,12 +664,10 @@
     el.textContent = txt;
   }
 
-  /* ---- barra di valutazione ---- */
   function winProb(cp) {
     const c = Math.max(-1000, Math.min(1000, cp || 0));
     return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * c)) - 1);
   }
-  /** Probabilità di vittoria del Bianco (0-100) per una valutazione "dal lato del Bianco". */
   function wpOf(ev) {
     if (!ev) return 50;
     if (ev.term === 'mate') return ev.winner === 'w' ? 100 : 0;
@@ -749,7 +703,6 @@
     label.className = 'eval-label ' + (atBottom ? 'at-bottom' : 'at-top') + ' ' + (whiteLeads ? 'on-light' : 'on-dark');
   }
 
-  /* ---- pulsanti attivi/disattivi ---- */
   function renderControls() {
     const last = S.fens.length - 1;
     byId('nav-first').disabled = S.view === 0;
@@ -793,10 +746,9 @@
   function onDrop(source, target) {
     if (target === 'offboard' || source === target) return 'snapback';
     const r = attemptMove(source, target, null, true);
-    return r === true ? undefined : 'snapback';
+    return (r === true || r === 'promo') ? undefined : 'snapback';
   }
   function onSnapEnd() {
-    // Riallinea la scacchiera (arrocco, en passant, promozione)
     if (board) board.position(S.fens[S.view], false);
     refreshHighlights();
   }
@@ -840,14 +792,14 @@
       const r = await engine.search(S.game.fen(), { depth: lvl.depth, movetime: lvl.time, skill: lvl.skill });
       uci = r.bestmove;
     } catch (e) {
-      if (token !== S.botToken) return; // partita annullata nel frattempo
+      if (token !== S.botToken) return;
       if (!engineWarned) {
         engineWarned = true;
         toast('Stockfish non è disponibile: il bot gioca mosse casuali.', 'warn');
       }
     }
     if (token !== S.botToken) return;
-    const wait = Math.max(0, 350 - (performance.now() - t0)); // piccola pausa "umana"
+    const wait = Math.max(0, 350 - (performance.now() - t0));
     if (wait) await sleep(wait);
     if (token !== S.botToken) return;
     S.botBusy = false;
@@ -870,7 +822,6 @@
     if (wasRunning) engine.cancelAll();
   }
 
-  /** Valutazione "esatta" per posizioni terminali (matto/patta), senza interrogare il motore. */
   function terminalEval(fen) {
     const c = new window.Chess(fen);
     if (c.in_checkmate()) return { term: 'mate', winner: c.turn() === 'w' ? 'b' : 'w', cp: null, mate: null, best: null };
@@ -878,7 +829,6 @@
     return null;
   }
 
-  /** Converte il risultato UCI (dal lato di chi muove) in valutazione dal lato del Bianco. */
   function toWhiteEval(r, fen) {
     const sign = fen.split(' ')[1] === 'w' ? 1 : -1;
     if (r.mate != null) return { cp: null, mate: sign * r.mate, best: r.bestmove, pv: r.pv };
@@ -928,8 +878,7 @@
     } catch (e) {
       if (token !== S.reviewToken) return;
       R.status = 'idle';
-      R.error = 'Stockfish non è disponibile (connessione o browser non supportato). ' +
-        'Puoi scaricare stockfish.js e metterlo accanto a index.html.';
+      R.error = 'Stockfish non è disponibile.';
       toast('Impossibile avviare Stockfish per la revisione.', 'error');
       renderReviewPanel();
       return;
@@ -941,7 +890,6 @@
     toast('Analisi completata');
   }
 
-  /** Classifica ogni mossa e calcola la precisione dei due giocatori. */
   function computeReview(R, fens, moves) {
     const acc = { w: [], b: [] };
     const counts = { w: {}, b: {} };
@@ -953,7 +901,7 @@
       const color = m.color;
       const before = wpOf(R.evals[i - 1]);
       const after = wpOf(R.evals[i]);
-      const loss = Math.max(0, color === 'w' ? before - after : after - before); // punti di "win%"
+      const loss = Math.max(0, color === 'w' ? before - after : after - before);
       const uci = m.from + m.to + (m.promotion || '');
       const bestUci = R.evals[i - 1].best;
       const onlyMove = new window.Chess(fens[i - 1]).moves().length === 1;
@@ -994,7 +942,6 @@
     byId('acc-w').textContent = fmt(R.summary.w.acc);
     byId('acc-b').textContent = fmt(R.summary.b.acc);
 
-    // Tabella delle classificazioni
     let rows = '<tr><th>Mosse</th><th>Bianco</th><th>Nero</th></tr>';
     CLASSES.forEach((c) => {
       rows += '<tr><td><span class="lbl"><i class="badge k-' + c.key + '">' + c.sym + '</i>' + c.label + '</span></td>' +
@@ -1043,10 +990,10 @@
   const net = {
     peer: null,
     ready: false,
-    pending: new Map(),          // peerId -> [callback di errore "peer-unavailable"]
-    presenceWaiters: new Map(),  // conn -> callback(pong)
-    status: {},                  // friendId -> 'online' | 'ingame' | 'offline' | 'checking'
-    room: null,                  // { peer, code, conn, open }
+    pending: new Map(),
+    presenceWaiters: new Map(),
+    status: {},
+    room: null,
     joining: null,
     outgoing: null,
     incoming: null,
@@ -1061,9 +1008,9 @@
   }
 
   const safeSend = (conn, msg) => {
-    try { if (conn && conn.open) conn.send(msg); } catch (e) { console.warn('send fallita', e); }
+    try { if (conn && conn.open) conn.send(msg); } catch (e) { }
   };
-  const closeLater = (conn) => setTimeout(() => { try { conn.close(); } catch (e) { /* ignora */ } }, 300);
+  const closeLater = (conn) => setTimeout(() => { try { conn.close(); } catch (e) {} }, 300);
 
   function initPeer() {
     if (typeof window.Peer === 'undefined') { setNetState('error', 'P2P non disponibile'); return; }
@@ -1085,7 +1032,7 @@
       setNetState('connecting', 'Riconnessione…');
       setTimeout(() => {
         if (net.peer && net.peer.disconnected && !net.peer.destroyed) {
-          try { net.peer.reconnect(); } catch (e) { /* ignora */ }
+          try { net.peer.reconnect(); } catch (e) {}
         }
       }, 2000);
     });
@@ -1114,7 +1061,6 @@
     }
   }
 
-  /** Apre una connessione dati verso un peer; rifiuta se non esiste o scade il tempo. */
   function connectTo(peerId, timeout) {
     return new Promise((resolve, reject) => {
       if (!net.peer || !net.peer.open) { reject(new Error('offline')); return; }
@@ -1126,7 +1072,7 @@
         clearTimeout(timer);
         const list = (net.pending.get(peerId) || []).filter((f) => f !== onUnavailable);
         if (list.length) net.pending.set(peerId, list); else net.pending.delete(peerId);
-        if (err) { try { conn && conn.close(); } catch (e) { /* ignora */ } reject(err); }
+        if (err) { try { conn && conn.close(); } catch (e) {} reject(err); }
         else resolve(conn);
       };
       const onUnavailable = () => finish(new Error('unavailable'));
@@ -1143,7 +1089,6 @@
   function attachConn(conn) {
     conn.on('data', (data) => routeMessage(conn, data));
     conn.on('close', () => onConnClosed(conn));
-    // Gli errori non fatali non devono interrompere la partita: se la connessione cade arriva "close".
     conn.on('error', (err) => console.warn('Errore connessione P2P:', err));
   }
 
@@ -1195,7 +1140,6 @@
     }
   }
 
-  /* ---------- Stato di presenza degli amici ---------- */
   async function pingFriend(f) {
     let conn;
     try { conn = await connectTo(PEER_USER + f.id, 5000); }
@@ -1204,12 +1148,12 @@
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         net.presenceWaiters.delete(conn);
-        try { conn.close(); } catch (e) { /* ignora */ }
+        try { conn.close(); } catch (e) {}
         resolve(null);
       }, 3500);
       net.presenceWaiters.set(conn, (pong) => {
         clearTimeout(timer);
-        try { conn.close(); } catch (e) { /* ignora */ }
+        try { conn.close(); } catch (e) {}
         resolve(pong);
       });
       safeSend(conn, { t: 'ping' });
@@ -1253,6 +1197,7 @@
 
   function renderFriends() {
     const ul = byId('friend-list');
+    if(!ul) return;
     byId('friends-empty').hidden = friends.length > 0;
     byId('friends-count').textContent = friends.length ? '(' + friends.length + ')' : '';
     ul.innerHTML = friends.map((f) => {
@@ -1261,7 +1206,7 @@
       const initial = (Array.from(f.name || '?')[0] || '?').toUpperCase();
       return '<li data-id="' + esc(f.id) + '">' +
         '<span class="avatar">' + esc(initial) + '</span>' +
-        '<div class="friend-meta"><strong>' + esc(f.name) + ' <span class="muted">#' + esc(f.id) + '</span></strong>' +
+        '<div class="friend-meta"><strong>' + esc(f.name) + ' <span class="muted">' + esc(f.id) + '</span></strong>' +
         '<small><i class="dot" data-s="' + st + '"></i>' + label + '</small></div>' +
         '<div class="friend-actions">' +
         '<button type="button" class="btn btn-sm btn-primary" data-action="challenge"' + (st === 'online' ? '' : ' disabled') + '>⚔ Sfida</button>' +
@@ -1275,8 +1220,8 @@
   }
 
   function addFriend(raw) {
-    const m = String(raw || '').trim().match(/^(?:(.*)#)?([A-Za-z0-9]{4,10})$/);
-    if (!m) { toast('Codice non valido. Esempio: Mario#K7P2QX', 'warn'); return false; }
+    const m = String(raw || '').trim().match(/^(?:(.*))?\s?([A-Za-z0-9]{4,10})$/);
+    if (!m) { toast('Codice non valido. Esempio: Mario K7P2QX', 'warn'); return false; }
     const id = cleanId(m[2]);
     if (id === profile.id) { toast('Questo è il tuo codice!', 'warn'); return false; }
     if (friends.some((f) => f.id === id)) { toast('Questo amico è già nella lista.', 'warn'); return false; }
@@ -1300,7 +1245,6 @@
     renderFriends();
   }
 
-  /* ---------- Sfida a un amico ---------- */
   async function challengeFriend(f) {
     if (!net.ready) { toast('Connessione P2P non ancora pronta.', 'warn'); return; }
     if (net.challengePending || net.outgoing || net.incoming || net.joining) { toast('Hai già una sfida in corso.', 'warn'); return; }
@@ -1316,7 +1260,7 @@
       return;
     }
     attachConn(conn);
-    const color = Math.random() < 0.5 ? 'w' : 'b'; // colore di chi sfida
+    const color = Math.random() < 0.5 ? 'w' : 'b';
     const o = { conn: conn, color: color, friend: f, settled: false };
     net.outgoing = o;
     net.challengePending = false;
@@ -1397,7 +1341,6 @@
     }
   }
 
-  /* ---------- Stanze con codice / link ---------- */
   function updateRoomUI() {
     const room = net.room;
     const box = byId('room-box');
@@ -1414,7 +1357,7 @@
   function destroyRoom() {
     const room = net.room;
     net.room = null;
-    if (room) { try { room.peer.destroy(); } catch (e) { /* ignora */ } }
+    if (room) { try { room.peer.destroy(); } catch (e) {} }
     updateRoomUI();
   }
 
@@ -1441,7 +1384,6 @@
 
   const roomLink = (code) => location.href.split('#')[0] + '#room=' + code;
 
-  /** Lato ospite: un amico è entrato nella mia stanza. */
   function onJoin(conn, msg) {
     const room = net.room;
     const mine = room && (!conn.provider || conn.provider === room.peer);
@@ -1456,7 +1398,6 @@
     startOnlineGame(conn, hostColor, cleanName(msg.name) || 'Ospite', cleanId(msg.id));
   }
 
-  /** Lato "entra": la stanza ha confermato e mi ha assegnato il colore. */
   function onStart(conn, msg) {
     const j = net.joining;
     if (!j || j.conn !== conn) return;
@@ -1480,7 +1421,7 @@
     j.timer = setTimeout(() => {
       if (net.joining === j) {
         net.joining = null;
-        try { conn.close(); } catch (e) { /* ignora */ }
+        try { conn.close(); } catch (e) {}
         toast('La stanza non ha risposto.', 'error');
       }
     }, 10000);
@@ -1492,14 +1433,13 @@
   function handleRoomHash() {
     const m = /[#&]room=([A-Za-z0-9]{4,10})/.exec(location.hash);
     if (!m) return;
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignora */ }
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
     switchTab('play');
     setUiMode('online');
     byId('join-code').value = m[1].toUpperCase();
     joinRoom(m[1]);
   }
 
-  /* ---------- Partita online ---------- */
   function startOnlineGame(conn, color, oppName, oppId) {
     resetState('online', {
       orientation: color === 'w' ? 'white' : 'black',
@@ -1512,7 +1452,6 @@
     toast('Partita contro ' + S.online.oppName + ': giochi con i ' + (color === 'w' ? 'Bianchi' : 'Neri') + '.');
   }
 
-  /** Chiude la sessione online corrente (avvisando l'avversario se la partita era in corso). */
   function closeOnlineSession(keepConn) {
     const o = S.online;
     if (o && o.conn !== keepConn) {
@@ -1530,7 +1469,7 @@
     if (!o) return;
     switch (msg.t) {
       case 'move': {
-        if (S.over || S.game.turn() === o.color) return; // non è il turno dell'avversario
+        if (S.over || S.game.turn() === o.color) return;
         if (!validSquare(msg.from) || !validSquare(msg.to)) return;
         const promo = typeof msg.promotion === 'string' && /^[qrbn]$/.test(msg.promotion) ? msg.promotion : undefined;
         const m = commitMove(msg.from, msg.to, promo, { remote: true });
@@ -1610,7 +1549,7 @@
     } else {
       setResult({ winner: S.game.turn() === 'w' ? 'b' : 'w', reason: 'abbandono' });
     }
-    S.botToken++; // ferma un eventuale bot in attesa
+    S.botToken++;
     S.botBusy = false;
     engine.cancelAll();
     concludeGame();
@@ -1644,7 +1583,6 @@
   }
 
   function bindEvents() {
-    // Navigazione (tab del pannello e link della barra superiore)
     qsa('.tab, .nav-link').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     qsa('#mode-switch button').forEach((b) => b.addEventListener('click', () => setUiMode(b.dataset.mode)));
 
@@ -1652,18 +1590,15 @@
       applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
     });
 
-    // Avvio partite
     byId('btn-start-bot').addEventListener('click', () => newGame('bot'));
     byId('btn-start-local').addEventListener('click', () => newGame('local'));
 
-    // Controlli partita
     byId('btn-flip').addEventListener('click', flipBoard);
     byId('btn-undo').addEventListener('click', undoMove);
     byId('btn-resign').addEventListener('click', resign);
     byId('btn-draw').addEventListener('click', offerDraw);
     byId('btn-copy-pgn').addEventListener('click', () => copyText(buildPgn(), 'PGN copiato negli appunti'));
 
-    // Navigazione tra le mosse
     byId('nav-first').addEventListener('click', () => goTo(0));
     byId('nav-prev').addEventListener('click', () => goTo(S.view - 1));
     byId('nav-next').addEventListener('click', () => goTo(S.view + 1));
@@ -1687,13 +1622,11 @@
       }
     });
 
-    // Click-to-move sulle caselle
     $('#board').on('click', '.square-55d63', function () {
       const m = /square-([a-h][1-8])/.exec(this.className);
       onSquareClick(m && m[1]);
     });
 
-    // Revisione
     byId('btn-review').addEventListener('click', runReview);
     byId('eval-graph').addEventListener('click', (e) => {
       if (S.review.status !== 'done') return;
@@ -1702,7 +1635,6 @@
       goTo(Math.round(ratio * (S.fens.length - 1)));
     });
 
-    // Modali
     byId('promo-choices').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-p]');
       if (!b) return;
@@ -1726,14 +1658,13 @@
       else newGame(S.mode);
     });
 
-    // Profilo e amici
     byId('profile-name').addEventListener('change', (e) => {
       const nm = cleanName(e.target.value);
       if (nm) { profile.name = nm; store.set('profile', profile); }
       renderProfile();
       renderPlayers();
     });
-    const copyId = () => copyText(profile.name + '#' + profile.id, 'Codice amico copiato: ' + profile.name + '#' + profile.id);
+    const copyId = () => copyText(profile.name + ' ' + profile.id, 'Codice amico copiato: ' + profile.name + ' ' + profile.id);
     byId('btn-copy-id').addEventListener('click', copyId);
     byId('user-chip').addEventListener('click', copyId);
     byId('form-add-friend').addEventListener('submit', (e) => {
@@ -1752,7 +1683,6 @@
       else removeFriend(f.id);
     });
 
-    // Stanze
     byId('btn-create-room').addEventListener('click', () => createRoom(0));
     byId('btn-cancel-room').addEventListener('click', destroyRoom);
     byId('btn-copy-code').addEventListener('click', () => { if (net.room) copyText(net.room.code, 'Codice stanza copiato'); });
@@ -1762,7 +1692,6 @@
       joinRoom(byId('join-code').value);
     });
 
-    // Ridimensionamento / visibilità
     window.addEventListener('resize', () => { if (board) { board.resize(); refreshHighlights(); } });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && net.ready) refreshPresence();
@@ -1774,8 +1703,8 @@
 
   function renderProfile() {
     byId('profile-name').value = profile.name;
-    byId('profile-code').textContent = profile.name + '#' + profile.id;
-    byId('user-chip-text').textContent = profile.name + '#' + profile.id;
+    byId('profile-code').textContent = profile.name + ' ' + profile.id;
+    byId('user-chip-text').textContent = profile.name + ' ' + profile.id;
     byId('user-avatar').textContent = (Array.from(profile.name)[0] || '?').toUpperCase();
   }
 
@@ -1801,18 +1730,18 @@
     renderProfile();
     renderFriends();
 
-    // Partita iniziale: contro il bot, tu col Bianco (pronta da giocare subito)
     resetState('bot', { botLevel: 3, myColor: 'w', botColor: 'b', orientation: 'white' });
     renderAll();
+    
+    // Mostra la tab Amici nascondendo visivamente la scacchiera iniziale all'apertura
+    switchTab('friends');
 
     initPeer();
-    // Precarica il motore in background per rendere più rapida la prima mossa del bot
-    setTimeout(() => { engine.init().catch(() => { /* gestito al primo uso */ }); }, 1500);
+    setTimeout(() => { engine.init().catch(() => { }); }, 1500);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
-  // Esposto solo per debug da console del browser
   window.chesspremium = { state: S, engine: engine, net: net };
 })();

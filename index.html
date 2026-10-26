@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="it" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="chesspremium: scacchi online gratuiti con sfide tra amici in P2P e revisione partita con Stockfish.">
+  <title>chesspremium — Scacchi gratis</title>
+
+  <!-- Imposta il tema PRIMA del rendering per evitare il "flash" bianco -->
+  <script>
+    (function () {
+      try {
+        var saved = JSON.parse(localStorage.getItem('cp.theme'));
+        var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', saved || (dark ? 'dark' : 'light'));
+      } catch (e) { /* storage non disponibile: resta il tema scuro di default */ }
+    })();
+  </script>
+
+  <!-- CSS di chessboard.js (CDN ufficiale) + il nostro CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===================== NAVBAR ===================== -->
+  <header class="navbar">
+    <a class="logo" href="./" aria-label="chesspremium - home">
+      <span class="logo-mark" aria-hidden="true">♞</span>
+      <span class="logo-text">chess<b>premium</b></span>
+    </a>
+
+    <nav class="nav-links" aria-label="Sezioni">
+      <button class="nav-link is-active" data-tab="play">Gioca</button>
+      <button class="nav-link" data-tab="friends">Amici <span class="pill" id="friends-online-count" hidden>0</span></button>
+      <button class="nav-link" data-tab="review">Revisione</button>
+    </nav>
+
+    <div class="nav-right">
+      <span class="net-pill" id="net-status" data-state="connecting" title="Stato della connessione P2P">
+        <i class="dot"></i><span id="net-status-text">Connessione…</span>
+      </span>
+      <button class="user-chip" id="user-chip" title="Il tuo codice amico (clic per copiare)">
+        <span class="avatar" id="user-avatar">G</span>
+        <span id="user-chip-text">Giocatore#------</span>
+      </button>
+      <button class="icon-btn" id="btn-theme" title="Cambia tema" aria-label="Cambia tema">◐</button>
+    </div>
+  </header>
+
+  <!-- ===================== LAYOUT PRINCIPALE ===================== -->
+  <main class="layout">
+
+    <!-- ---------- Colonna scacchiera ---------- -->
+    <section class="board-col" aria-label="Scacchiera">
+      <div class="player-bar" id="bar-top">
+        <span class="avatar" data-role="avatar">?</span>
+        <div class="player-info">
+          <strong data-role="name">—</strong>
+          <span class="captured" data-role="captured"></span>
+        </div>
+        <span class="material" data-role="material"></span>
+      </div>
+
+      <div class="board-area">
+        <div class="eval-bar" id="eval-bar" title="Valutazione di Stockfish">
+          <div class="eval-fill" id="eval-fill"></div>
+          <span class="eval-label" id="eval-label"></span>
+        </div>
+        <div class="board-wrap" id="board-wrap">
+          <div id="board"></div>
+          <!-- Overlay per le frecce (mossa migliore) -->
+          <svg id="overlay" viewBox="0 0 800 800" aria-hidden="true"></svg>
+        </div>
+      </div>
+
+      <div class="player-bar" id="bar-bottom">
+        <span class="avatar" data-role="avatar">?</span>
+        <div class="player-info">
+          <strong data-role="name">—</strong>
+          <span class="captured" data-role="captured"></span>
+        </div>
+        <span class="material" data-role="material"></span>
+      </div>
+
+      <div class="status-line" id="status" role="status" aria-live="polite">Pronto a giocare</div>
+    </section>
+
+    <!-- ---------- Pannello laterale ---------- -->
+    <aside class="side">
+
+      <div class="tabs" role="tablist">
+        <button class="tab is-active" role="tab" data-tab="play">♟ Gioca</button>
+        <button class="tab" role="tab" data-tab="friends">👥 Amici</button>
+        <button class="tab" role="tab" data-tab="review">📊 Revisione</button>
+      </div>
+
+      <!-- ===== TAB: GIOCA ===== -->
+      <div class="tab-panel is-active" id="tab-play" role="tabpanel">
+        <div class="segmented" id="mode-switch" role="group" aria-label="Modalità di gioco">
+          <button data-mode="bot" class="is-active">🤖 Bot</button>
+          <button data-mode="local">👥 Locale</button>
+          <button data-mode="online">🌐 Online</button>
+        </div>
+
+        <!-- Opzioni Bot -->
+        <div class="mode-panel is-active" id="opt-bot">
+          <label class="field">
+            <span>Livello del bot</span>
+            <select id="bot-level">
+              <option value="1">1 · Principiante</option>
+              <option value="2">2 · Facile</option>
+              <option value="3" selected>3 · Intermedio</option>
+              <option value="4">4 · Esperto</option>
+              <option value="5">5 · Maestro</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Il tuo colore</span>
+            <select id="bot-color">
+              <option value="w">Bianco</option>
+              <option value="b">Nero</option>
+              <option value="r" selected>Casuale</option>
+            </select>
+          </label>
+          <button class="btn btn-primary btn-block" id="btn-start-bot">▶ Gioca contro il bot</button>
+          <p class="hint">Il bot usa Stockfish direttamente nel tuo browser. Nessun server, nessun costo.</p>
+        </div>
+
+        <!-- Opzioni Locale -->
+        <div class="mode-panel" id="opt-local">
+          <p class="hint">Due giocatori sullo stesso schermo: i bianchi iniziano, poi si passa il dispositivo.</p>
+          <button class="btn btn-primary btn-block" id="btn-start-local">▶ Nuova partita locale</button>
+        </div>
+
+        <!-- Opzioni Online -->
+        <div class="mode-panel" id="opt-online">
+          <div class="card-inner">
+            <h3>Crea una stanza</h3>
+            <p class="hint">Genera un codice o un link da mandare a un amico. Connessione diretta P2P, gratis.</p>
+            <button class="btn btn-primary btn-block" id="btn-create-room">＋ Crea stanza</button>
+            <div class="room-box" id="room-box" hidden>
+              <div class="room-code" id="room-code">------</div>
+              <div class="row">
+                <button class="btn btn-sm" id="btn-copy-code">Copia codice</button>
+                <button class="btn btn-sm" id="btn-copy-link">Copia link</button>
+                <button class="btn btn-sm btn-ghost" id="btn-cancel-room">Annulla</button>
+              </div>
+              <p class="hint" id="room-hint">In attesa che il tuo amico entri…</p>
+            </div>
+          </div>
+          <div class="card-inner">
+            <h3>Unisciti con un codice</h3>
+            <form class="row" id="form-join">
+              <input type="text" id="join-code" placeholder="Codice stanza" maxlength="10" autocomplete="off" spellcheck="false">
+              <button class="btn btn-primary" type="submit">Entra</button>
+            </form>
+          </div>
+          <p class="hint">Vuoi sfidare qualcuno della tua lista? Vai alla scheda <b>Amici</b>.</p>
+        </div>
+      </div>
+
+      <!-- ===== TAB: AMICI ===== -->
+      <div class="tab-panel" id="tab-friends" role="tabpanel">
+        <div class="card-inner">
+          <h3>Il tuo profilo</h3>
+          <label class="field">
+            <span>Username</span>
+            <input type="text" id="profile-name" maxlength="20" autocomplete="off" spellcheck="false">
+          </label>
+          <div class="row">
+            <code class="id-code" id="profile-code">—</code>
+            <button class="btn btn-sm" id="btn-copy-id">Copia</button>
+          </div>
+          <p class="hint">Condividi il tuo codice amico: chi lo inserisce potrà vedere se sei online e sfidarti.</p>
+        </div>
+
+        <div class="card-inner">
+          <h3>Aggiungi un amico</h3>
+          <form class="row" id="form-add-friend">
+            <input type="text" id="friend-input" placeholder="Codice (es. Mario#K7P2QX)" autocomplete="off" spellcheck="false">
+            <button class="btn btn-primary" type="submit">Aggiungi</button>
+          </form>
+        </div>
+
+        <div class="card-inner">
+          <div class="row row-between">
+            <h3>Amici <span class="muted" id="friends-count"></span></h3>
+            <button class="btn btn-sm btn-ghost" id="btn-refresh-friends" title="Aggiorna lo stato">⟳ Aggiorna</button>
+          </div>
+          <ul class="friend-list" id="friend-list"></ul>
+          <p class="hint" id="friends-empty">Nessun amico ancora. Aggiungi un codice per iniziare.</p>
+        </div>
+      </div>
+
+      <!-- ===== TAB: REVISIONE ===== -->
+      <div class="tab-panel" id="tab-review" role="tabpanel">
+        <div class="card-inner">
+          <h3>Revisione con Stockfish</h3>
+          <div class="row">
+            <label class="field grow">
+              <span>Profondità</span>
+              <select id="review-depth">
+                <option value="8">Veloce (profondità 8)</option>
+                <option value="11" selected>Standard (profondità 11)</option>
+                <option value="14">Profonda (profondità 14)</option>
+              </select>
+            </label>
+          </div>
+          <button class="btn btn-primary btn-block" id="btn-review">📊 Analizza la partita</button>
+          <div class="progress" id="review-progress" hidden>
+            <div class="progress-bar" id="review-progress-bar"></div>
+          </div>
+          <p class="hint" id="review-hint">Analizza la partita corrente: precisione, errori, sviste e mosse migliori. Gratis e illimitata.</p>
+        </div>
+
+        <div id="review-results" hidden>
+          <div class="card-inner">
+            <div class="acc-grid">
+              <div class="acc-card">
+                <span class="muted">Bianco</span>
+                <strong id="acc-w">–</strong>
+                <small>precisione</small>
+              </div>
+              <div class="acc-card">
+                <span class="muted">Nero</span>
+                <strong id="acc-b">–</strong>
+                <small>precisione</small>
+              </div>
+            </div>
+            <svg id="eval-graph" class="eval-graph" viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="Grafico della valutazione"></svg>
+          </div>
+
+          <div class="card-inner" id="move-comment" hidden></div>
+
+          <div class="card-inner">
+            <table class="class-table" id="class-table"></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== MOSSE + CONTROLLI (sempre visibili) ===== -->
+      <section class="moves-card" aria-label="Mosse">
+        <div class="moves-head">
+          <div class="nav-btns" role="group" aria-label="Navigazione mosse">
+            <button class="icon-btn" id="nav-first" title="Inizio (Home)">⏮</button>
+            <button class="icon-btn" id="nav-prev" title="Indietro (←)">◀</button>
+            <button class="icon-btn" id="nav-next" title="Avanti (→)">▶</button>
+            <button class="icon-btn" id="nav-last" title="Fine (End)">⏭</button>
+          </div>
+          <button class="btn btn-sm btn-ghost" id="btn-copy-pgn" title="Copia il PGN negli appunti">PGN</button>
+        </div>
+        <div class="move-list" id="move-list" tabindex="0" aria-label="Elenco mosse"></div>
+        <div class="actions">
+          <button class="btn btn-sm" id="btn-flip">⇅ Ruota</button>
+          <button class="btn btn-sm" id="btn-undo">↶ Annulla</button>
+          <button class="btn btn-sm" id="btn-draw">½ Patta</button>
+          <button class="btn btn-sm btn-danger" id="btn-resign">⚑ Abbandona</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    chesspremium · progetto gratuito e senza server · motore <a href="https://github.com/nmrugg/stockfish.js" target="_blank" rel="noopener">Stockfish.js</a> · regole con chess.js · connessioni P2P con PeerJS
+  </footer>
+
+  <!-- ===================== MODALI ===================== -->
+
+  <!-- Scelta promozione -->
+  <div class="modal-backdrop" id="modal-promo" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="promo-title">
+      <h2 id="promo-title">Promuovi il pedone</h2>
+      <div class="promo-choices" id="promo-choices"></div>
+      <button class="btn btn-ghost btn-block" id="promo-cancel">Annulla</button>
+    </div>
+  </div>
+
+  <!-- Fine partita -->
+  <div class="modal-backdrop" id="modal-over" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="over-title">
+      <h2 id="over-title">Partita terminata</h2>
+      <p id="over-text" class="modal-text"></p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="over-review">📊 Revisione partita</button>
+        <button class="btn" id="over-new">Nuova partita</button>
+        <button class="btn btn-ghost" id="over-close">Chiudi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Conferma generica (sfide ricevute, offerte di patta, abbandono…) -->
+  <div class="modal-backdrop" id="modal-confirm" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">Conferma</h2>
+      <p id="confirm-text" class="modal-text"></p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="confirm-ok">OK</button>
+        <button class="btn btn-ghost" id="confirm-cancel">Annulla</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notifiche -->
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <!-- ===================== LIBRERIE (CDN gratuite) ===================== -->
+  <!-- jQuery è richiesto da chessboard.js -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+  <!-- chess.js 0.10.x: regole, mosse legali, PGN, scacco matto/patta -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.js"></script>
+  <!-- PeerJS: connessioni P2P (broker di segnalazione pubblico e gratuito) -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+  <script src="app.js"></script>
+</body>
+</html>
